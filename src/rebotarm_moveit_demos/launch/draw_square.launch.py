@@ -1,8 +1,25 @@
+from pathlib import Path
+
+import yaml
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+
+
+def _default_model():
+    try:
+        path = Path(
+            get_package_share_directory("rebotarm_bringup")
+        ) / "config" / "rebotarm_hardware.yaml"
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                return str((yaml.safe_load(f) or {}).get("default_model") or "dm")
+    except (PackageNotFoundError, OSError):
+        pass
+    return "dm"
 
 
 def generate_launch_description():
@@ -25,7 +42,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument(
                 "model",
-                default_value="dm",
+                default_value=_default_model(),
                 description="Robot model used by the active MoveIt demo: dm or rs",
             ),
             Node(

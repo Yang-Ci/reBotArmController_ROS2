@@ -1,6 +1,9 @@
 import os
 import signal
-from ament_index_python.packages import get_package_share_directory
+from pathlib import Path
+
+import yaml
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from importlib.machinery import SourceFileLoader
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, EmitEvent, OpaqueFunction, RegisterEventHandler
@@ -19,6 +22,19 @@ moveit_parameters = SourceFileLoader(
 ).load_module().moveit_parameters
 
 
+def _default_model():
+    try:
+        path = Path(
+            get_package_share_directory("rebotarm_bringup")
+        ) / "config" / "rebotarm_hardware.yaml"
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                return str((yaml.safe_load(f) or {}).get("default_model") or "dm")
+    except (PackageNotFoundError, OSError):
+        pass
+    return "dm"
+
+
 def generate_launch_description():
     rviz_config_arg = DeclareLaunchArgument(
         "rviz_config",
@@ -32,7 +48,7 @@ def generate_launch_description():
     )
     model_arg = DeclareLaunchArgument(
         "model",
-        default_value="dm",
+        default_value=_default_model(),
         description="Robot model to load: dm or rs",
     )
 

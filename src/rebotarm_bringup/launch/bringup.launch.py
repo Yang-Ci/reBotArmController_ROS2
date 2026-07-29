@@ -1,5 +1,13 @@
+from pathlib import Path
+
+import yaml
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, Shutdown
+from launch.actions import (
+    DeclareLaunchArgument,
+    OpaqueFunction,
+    SetLaunchConfiguration,
+    Shutdown,
+)
 from launch.conditions import IfCondition
 from launch.substitutions import (
     Command,
@@ -10,6 +18,21 @@ from launch.substitutions import (
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
+
+
+def _resolve_effective_model(context, *args, **kwargs):
+    model = LaunchConfiguration("model").perform(context).strip()
+    if model:
+        effective = model
+    else:
+        config_path_str = LaunchConfiguration("hardware_config").perform(context)
+        config_path = Path(config_path_str).expanduser() if config_path_str else None
+        effective = "dm"
+        if config_path and config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                ros_config = yaml.safe_load(f) or {}
+            effective = str(ros_config.get("default_model") or "dm")
+    return [SetLaunchConfiguration("effective_model", effective.strip().lower())]
 
 
 def generate_launch_description():
@@ -24,6 +47,7 @@ def generate_launch_description():
     frame_id = LaunchConfiguration("frame_id")
     ee_frame_id = LaunchConfiguration("ee_frame_id")
     disable_after_safe_home = LaunchConfiguration("disable_after_safe_home")
+    effective_model = LaunchConfiguration("effective_model")
 
     urdf_file = PathJoinSubstitution(
         [
@@ -33,7 +57,7 @@ def generate_launch_description():
             PythonExpression(
                 [
                     "'00-arm-rs_asm-v3.urdf' if '",
-                    model,
+                    effective_model,
                     "'.lower() == 'rs' else 'reBot-DevArm_fixend.urdf'",
                 ]
             ),
@@ -59,6 +83,7 @@ def generate_launch_description():
             DeclareLaunchArgument("frame_id", default_value="base_link"),
             DeclareLaunchArgument("ee_frame_id", default_value="end_link"),
             DeclareLaunchArgument("disable_after_safe_home", default_value="true"),
+            OpaqueFunction(function=_resolve_effective_model),
             Node(
                 package="rebotarmcontroller",
                 executable="reBotArmController",
