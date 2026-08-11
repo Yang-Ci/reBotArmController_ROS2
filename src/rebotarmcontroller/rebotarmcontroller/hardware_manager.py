@@ -436,6 +436,8 @@ class HardwareManager:
             kp=self._gravity_comp_kp,
             kd=self._gravity_comp_kd,
         )
+        if self.has_gripper:
+            self._gripper_group.mode_mit()
         self._robot.disable_all()
         time.sleep(0.1)
         self._robot.enable_all()
@@ -486,37 +488,36 @@ class HardwareManager:
 
     def _gravity_comp_tick(self, _robot, dt: float) -> None:
         del dt
-        if not self._cmd_lock.acquire(blocking=False):
+        if not self._gravity_comp_active:
             return
-        try:
-            if not self._gravity_comp_active:
-                return
 
-            q = self._read_gravity_comp_positions(request=True)
-            q_for_model = q * self._gravity_comp_joint_direction
-            q_model = self._pad_q_for_model(
-                self._gc_model, q_for_model, len(self.joint_names)
-            )
-            tau_model = self._gc_compute_generalized_gravity(
-                self._gc_model,
-                q_model,
-                self._gc_data,
-            )[: len(self.joint_names)]
-            tau_motor = (
-                tau_model
-                * self._gravity_comp_joint_direction
-                * self._gravity_comp_tau_scale
-            )
+        q = self._read_gravity_comp_positions(request=False)
+        q_for_model = q * self._gravity_comp_joint_direction
+        q_model = self._pad_q_for_model(
+            self._gc_model, q_for_model, len(self.joint_names)
+        )
+        tau_model = self._gc_compute_generalized_gravity(
+            self._gc_model,
+            q_model,
+            self._gc_data,
+        )[: len(self.joint_names)]
+        tau_motor = (
+            tau_model
+            * self._gravity_comp_joint_direction
+            * self._gravity_comp_tau_scale
+        )
 
-            self._arm_group.send_mit(
-                q,
-                vel=np.zeros(len(self.joint_names)),
-                kp=self._gravity_comp_kp,
-                kd=self._gravity_comp_kd,
-                tau=tau_motor,
+        self._arm_group.send_mit(
+            q,
+            vel=np.zeros(len(self.joint_names)),
+            kp=self._gravity_comp_kp,
+            kd=self._gravity_comp_kd,
+            tau=tau_motor,
+        )
+        if self.has_gripper:
+            self._gripper_group.send_mit(
+                self._gripper_group.get_positions()
             )
-        finally:
-            self._cmd_lock.release()
 
     # ------------------------------------------------------------------
     # gripper
