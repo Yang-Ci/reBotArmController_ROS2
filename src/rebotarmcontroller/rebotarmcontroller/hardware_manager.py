@@ -330,8 +330,13 @@ class HardwareManager:
         target_kd = np.array(self._arm_mit_kd, dtype=np.float64, copy=True)
         target_pos[index] = float(pos)
         target_vel[index] = float(vel)
-        target_kp[index] = float(kp)
-        target_kd[index] = float(kd)
+        # When the web sends kp=0 or kd=0, keep the hardware's default gains
+        # so the motor maintains PD control without the web needing to know
+        # the per-joint MIT parameters.
+        if kp != 0:
+            target_kp[index] = float(kp)
+        if kd != 0:
+            target_kd[index] = float(kd)
         target_tau[index] = float(tau)
         self._arm_group.send_mit(
             target_pos,
@@ -585,11 +590,15 @@ class HardwareManager:
     ) -> None:
         self._begin_gripper_command()
         self._begin_gripper_lowlevel("mit")
+        # When the web sends kp=0 or kd=0, pass None so the JointGroup
+        # falls back to its configured MIT gains (from the SDK config).
+        gripper_kp = np.array([float(kp)], dtype=np.float64) if kp != 0 else None
+        gripper_kd = np.array([float(kd)], dtype=np.float64) if kd != 0 else None
         self._gripper_group.send_mit(
             np.array([float(pos)], dtype=np.float64),
             vel=np.array([float(vel)], dtype=np.float64),
-            kp=np.array([float(kp)], dtype=np.float64),
-            kd=np.array([float(kd)], dtype=np.float64),
+            kp=gripper_kp,
+            kd=gripper_kd,
             tau=np.array([float(tau)], dtype=np.float64),
         )
         self._gripper_target_position = None
