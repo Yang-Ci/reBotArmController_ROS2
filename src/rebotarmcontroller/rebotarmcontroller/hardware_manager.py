@@ -330,8 +330,13 @@ class HardwareManager:
         target_kd = np.array(self._arm_mit_kd, dtype=np.float64, copy=True)
         target_pos[index] = float(pos)
         target_vel[index] = float(vel)
-        target_kp[index] = float(kp)
-        target_kd[index] = float(kd)
+        # When the web sends kp=0 or kd=0, keep the hardware's default gains
+        # so the motor maintains PD control without the web needing to know
+        # the per-joint MIT parameters.
+        if kp != 0:
+            target_kp[index] = float(kp)
+        if kd != 0:
+            target_kd[index] = float(kd)
         target_tau[index] = float(tau)
         self._arm_group.send_mit(
             target_pos,
@@ -436,6 +441,8 @@ class HardwareManager:
             kp=self._gravity_comp_kp,
             kd=self._gravity_comp_kd,
         )
+        if self.has_gripper:
+            self._gripper_group.mode_mit()
         self._robot.disable_all()
         time.sleep(0.1)
         self._robot.enable_all()
@@ -486,37 +493,36 @@ class HardwareManager:
 
     def _gravity_comp_tick(self, _robot, dt: float) -> None:
         del dt
-        if not self._cmd_lock.acquire(blocking=False):
+        if not self._gravity_comp_active:
             return
-        try:
-            if not self._gravity_comp_active:
-                return
 
-            q = self._read_gravity_comp_positions(request=True)
-            q_for_model = q * self._gravity_comp_joint_direction
-            q_model = self._pad_q_for_model(
-                self._gc_model, q_for_model, len(self.joint_names)
-            )
-            tau_model = self._gc_compute_generalized_gravity(
-                self._gc_model,
-                q_model,
-                self._gc_data,
-            )[: len(self.joint_names)]
-            tau_motor = (
-                tau_model
-                * self._gravity_comp_joint_direction
-                * self._gravity_comp_tau_scale
-            )
+        q = self._read_gravity_comp_positions(request=False)
+        q_for_model = q * self._gravity_comp_joint_direction
+        q_model = self._pad_q_for_model(
+            self._gc_model, q_for_model, len(self.joint_names)
+        )
+        tau_model = self._gc_compute_generalized_gravity(
+            self._gc_model,
+            q_model,
+            self._gc_data,
+        )[: len(self.joint_names)]
+        tau_motor = (
+            tau_model
+            * self._gravity_comp_joint_direction
+            * self._gravity_comp_tau_scale
+        )
 
-            self._arm_group.send_mit(
-                q,
-                vel=np.zeros(len(self.joint_names)),
-                kp=self._gravity_comp_kp,
-                kd=self._gravity_comp_kd,
-                tau=tau_motor,
+        self._arm_group.send_mit(
+            q,
+            vel=np.zeros(len(self.joint_names)),
+            kp=self._gravity_comp_kp,
+            kd=self._gravity_comp_kd,
+            tau=tau_motor,
+        )
+        if self.has_gripper:
+            self._gripper_group.send_mit(
+                self._gripper_group.get_positions()
             )
-        finally:
-            self._cmd_lock.release()
 
     # ------------------------------------------------------------------
     # gripper
@@ -584,11 +590,15 @@ class HardwareManager:
     ) -> None:
         self._begin_gripper_command()
         self._begin_gripper_lowlevel("mit")
+        # When the web sends kp=0 or kd=0, pass None so the JointGroup
+        # falls back to its configured MIT gains (from the SDK config).
+        gripper_kp = np.array([float(kp)], dtype=np.float64) if kp != 0 else None
+        gripper_kd = np.array([float(kd)], dtype=np.float64) if kd != 0 else None
         self._gripper_group.send_mit(
             np.array([float(pos)], dtype=np.float64),
             vel=np.array([float(vel)], dtype=np.float64),
-            kp=np.array([float(kp)], dtype=np.float64),
-            kd=np.array([float(kd)], dtype=np.float64),
+            kp=gripper_kp,
+            kd=gripper_kd,
             tau=np.array([float(tau)], dtype=np.float64),
         )
         self._gripper_target_position = None
